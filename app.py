@@ -1,28 +1,27 @@
 import streamlit as st
 import google.generativeai as genai
+import urllib.parse  # 新增：用來處理網址編碼
 
 st.set_page_config(page_title="巴黎美食 AI", page_icon="🇫🇷")
 st.title("🇫🇷 巴黎餐廳 AI 分析器")
-st.caption("輸入餐廳，AI 自動調用您帳號可用的模型進行分析")
+st.caption("專注於 TheFork 與 Le Fooding 的深度分析")
 
-# 左側輸入 API Key
-with st.sidebar:
-    api_key = st.text_input("輸入 Gemini API Key", type="password")
-    st.markdown("[👉 按此取得免費 Key](https://aistudio.google.com/app/apikey)")
+# --- API Key 處理邏輯 ---
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+else:
+    with st.sidebar:
+        api_key = st.text_input("輸入 Gemini API Key", type="password")
+        st.markdown("[👉 按此取得免費 Key](https://aistudio.google.com/app/apikey)")
 
-# --- 關鍵功能：直接問系統有哪些模型可用 ---
+# --- 自動偵測模型 ---
 def get_first_working_model(api_key):
-    """
-    不猜測模型名稱，直接列出帳號下可用的模型，並回傳第一個。
-    """
     try:
         genai.configure(api_key=api_key)
-        # 列出所有模型
         for m in genai.list_models():
-            # 只要該模型支援「文字生成 (generateContent)」，就直接選它
             if 'generateContent' in m.supported_generation_methods:
-                return m.name # 直接回傳系統給的名稱 (例如 models/gemini-pro)
-    except Exception as e:
+                return m.name
+    except Exception:
         return None
     return None
 
@@ -31,48 +30,70 @@ restaurant_name = st.text_input("請輸入餐廳名稱 (例如: Septime)")
 
 if st.button("開始分析") and restaurant_name:
     if not api_key:
-        st.error("請先在左側輸入 API Key 喔！")
+        st.error("請先設定 API Key！")
     else:
-        # 1. 連結區
-        st.subheader("🔗 快速傳送門")
+        # --- 1. 改良版：快速傳送門 (自動搜尋) ---
+        st.subheader("🔗 快速傳送門 (點擊直達搜尋結果)")
+        
+        # 處理網址編碼 (例如把空格變成 %20)，並強制加上 Paris 以防搜尋到別的城市
+        search_query = urllib.parse.quote(f"{restaurant_name} Paris")
+        
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.link_button("Google Maps", f"https://www.google.com/maps/search/{restaurant_name}+Paris")
+            # Google Maps 還是留著方便看地圖，但分析不看它
+            st.link_button("📍 Google Maps", f"https://www.google.com/maps/search/?api=1&query={search_query}")
         with col2:
-            st.link_button("TheFork (訂位)", f"https://www.thefork.fr/search?q={restaurant_name}")
+            # TheFork 搜尋連結
+            st.link_button("🍴 TheFork", f"https://www.thefork.fr/search?q={search_query}")
         with col3:
-            st.link_button("Le Fooding (食評)", f"https://lefooding.com/en/search?query={restaurant_name}")
+            # Le Fooding 搜尋連結
+            st.link_button("🍷 Le Fooding", f"https://lefooding.com/en/search?query={search_query}")
 
-        # 2. AI 分析
+        # --- 2. 嚴格限制版 AI 分析 ---
         st.divider()
-        status_box = st.empty() # 建立一個狀態顯示框
+        status_box = st.empty()
         
         try:
-            status_box.info("🔍 正在尋找您帳號可用的 AI 模型...")
+            status_box.info("🔍 正在調閱 TheFork 與 Le Fooding 資料庫...")
             
-            # 自動抓取正確的模型名稱
             valid_model_name = get_first_working_model(api_key)
             
             if not valid_model_name:
-                status_box.error("❌ 找不到任何可用模型！請確認您的 API Key 是否正確，或是否已在 Google AI Studio 開通權限。")
+                status_box.error("❌ 找不到可用模型，請檢查 API Key。")
             else:
-                status_box.success(f"✅ 成功連線！使用模型：{valid_model_name}")
-                
-                # 建立模型
+                status_box.success(f"✅ 連線成功 ({valid_model_name})")
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(valid_model_name)
                 
-                with st.spinner("AI 正在撰寫分析報告..."):
+                with st.spinner("AI 正在交叉比對兩大平台數據..."):
+                    # 修改後的 Prompt：嚴格限制來源
                     prompt = f"""
-                    你是一位嚴格的巴黎美食評論家。使用者想去 "{restaurant_name}"。
-                    請用繁體中文分析：
-                    1.這家店的風格與定位？
-                    2.必點的 2 道菜是什麼？
-                    3.有什麼缺點或地雷？(例如難訂位、服務差、遊客太多)
-                    4.綜合評分 (1-10分) 與一句話結論。
+                    你是一位專精於巴黎餐廳的數據分析師。使用者查詢餐廳 "{restaurant_name}"。
+                    
+                    【重要規則】
+                    1. 你的分析範圍 **「嚴格僅限於」** TheFork 和 Le Fooding 這兩個平台的資料與觀點。
+                    2. **請忽略** Google Maps、TripAdvisor 或米其林指南的評分。
+                    3. 如果這家餐廳在這兩個平台找不到資料，請誠實回答「此平台無資料」。
+
+                    請用繁體中文輸出以下結構化報告：
+
+                    ### 1. 🍴 TheFork 數據分析
+                    * **評分與人氣**：(預估該平台上的分數，例如 9.2/10)
+                    * **價格與優惠**：(平均消費金額，以及該平台常見的折扣狀況，例如 -30% off)
+                    * **評論關鍵詞**：(用戶常提到的優缺點)
+
+                    ### 2. 🍷 Le Fooding 風格快評
+                    * **氛圍定位**：(這是潮店、老派酒館還是觀光客店？)
+                    * **小編觀點**：(Le Fooding 通常會用什麼形容詞來描述這家店？例如：生動、自然酒、擁擠...)
+                    * **必點推薦**：(根據食評推薦的菜色)
+
+                    ### 3. ⚖️ 兩平台綜合結論
+                    * **這家店適合誰？** (例如：適合想省錢的吃貨 vs 適合追求氛圍的文青)
+                    * **決策建議**：(去還是不去？)
                     """
+                    
                     response = model.generate_content(prompt)
                     st.markdown(response.text)
                     
         except Exception as e:
-            st.error(f"發生未預期的錯誤: {e}")
+            st.error(f"發生錯誤: {e}")
