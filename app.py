@@ -95,10 +95,11 @@ with tab1:
                 st.error(f"發生錯誤: {e}")
 
 # ==========================================
-# 分頁 2: 附近探索 (新增星級顯示)
+# 分頁 2: 嚴格篩選版附近探索
 # ==========================================
 with tab2:
     st.header("📍 尋找附近 100m 美食")
+    st.caption("✅ 只顯示 TheFork 或 Le Fooding 上有資料的餐廳")
     location_input = st.text_input("請輸入您現在的地點或景點", placeholder="例如: Louvre Museum (羅浮宮)")
     
     if st.button("搜尋附近餐廳", key="btn_explore"):
@@ -112,43 +113,51 @@ with tab2:
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(valid_model_name)
                 
-                with st.spinner(f"正在搜尋 {location_input} 周圍，並調閱 Google 評分..."):
-                    # Prompt 更新：要求提供 Rating 和 Review Count
+                with st.spinner(f"正在過濾非合作餐廳，僅保留 TheFork/Le Fooding 名單..."):
+                    # Prompt 更新：加入嚴格的「平台存在性檢查」
                     explore_prompt = f"""
-                    使用者目前在巴黎的地點："{location_input}"。
-                    請推薦 3 到 5 家位於該地點 **「走路 5 分鐘內」** 且在 TheFork/Le Fooding 有名氣的餐廳。
+                    任務：找出巴黎地點 "{location_input}" 附近 **走路 5 分鐘內** 的餐廳。
 
-                    【格式嚴格要求】
-                    請給我乾淨的清單，不要有前言後語。每一行一家餐廳，格式如下(直立線分隔)：
-                    Name: 餐廳名 | Style: 風格 | Rating: Google評分 (例如 4.5) | Count: 評論數 (例如 1200+)
+                    【🔥 絕對關鍵規則 🔥】
+                    1. **過濾機制**：你推薦的餐廳，必須是你「確定」在 **TheFork** (有訂位/折扣) 或 **Le Fooding** (有食評) 上有資料的。
+                    2. 如果一家店 Google 評價很高，但在這兩個平台找不到，請 **「直接剔除，不要列出來」**。
+                    3. 請標註該餐廳是出現在哪個平台 (Source)。
+
+                    【輸出格式】
+                    每一行一家餐廳，格式如下(直立線分隔)：
+                    Name: 餐廳名 | Style: 風格 | Rating: Google評分 | Count: 評論數 | Source: 平台標記
 
                     範例：
-                    Name: Le Louvre | Style: 法式餐酒館 | Rating: 4.2 | Count: 850+
-                    Name: Zen | Style: 日本拉麵 | Rating: 4.6 | Count: 2100+
+                    Name: Le Louvre | Style: 法式 | Rating: 4.2 | Count: 850+ | Source: TheFork & Le Fooding
+                    Name: Zen | Style: 拉麵 | Rating: 4.6 | Count: 2100+ | Source: Only TheFork
                     """
                     
                     response = model.generate_content(explore_prompt)
                     
-                    st.success(f"✨ 在 {location_input} 附近找到以下熱門餐廳：")
+                    st.success(f"✨ 在 {location_input} 附近找到以下「平台認證」餐廳：")
                     
                     lines = response.text.split('\n')
+                    found_any = False
                     for line in lines:
                         if "Name:" in line:
+                            found_any = True
                             clean_line = line.replace("*", "").strip()
                             parts = clean_line.split('|')
                             
-                            # 解析資料 (防呆機制：如果 AI 格式跑掉也能處理)
+                            # 解析資料
                             r_name_raw = parts[0].replace("Name:", "").strip() if len(parts) > 0 else "未知餐廳"
                             r_style = parts[1].replace("Style:", "").strip() if len(parts) > 1 else "風格未知"
                             r_rating = parts[2].replace("Rating:", "").strip() if len(parts) > 2 else "N/A"
                             r_count = parts[3].replace("Count:", "").strip() if len(parts) > 3 else "N/A"
+                            r_source = parts[4].replace("Source:", "").strip() if len(parts) > 4 else "TheFork/Le Fooding"
                             
-                            # 介面顯示：左邊顯示詳細資訊，右邊放按鈕
+                            # 介面顯示
                             col_a, col_b = st.columns([3, 1])
                             with col_a:
-                                # 用 HTML 語法讓星級變顯眼
+                                # 顯示平台標籤，讓使用者安心
                                 st.markdown(f"""
-                                **{r_name_raw}** ⭐ **{r_rating}** <small style='color:gray'>({r_count} 評論)</small>  
+                                **{r_name_raw}** ⭐ **{r_rating}** <small>({r_count})</small>  
+                                <span style='background-color:#e0f7fa; padding:2px 6px; border-radius:4px; font-size:0.8em; color:#006064'>✅ {r_source}</span>  
                                 <small style='color:#555'>{r_style}</small>
                                 """, unsafe_allow_html=True)
                                 
@@ -158,9 +167,12 @@ with tab2:
                                 st.button("分析它 👉", key=f"btn_{r_name_raw}", on_click=set_name)
                             
                             st.divider()
+                    
+                    if not found_any:
+                        st.warning("在此地點附近找不到「同時符合距離」且「在 TheFork/Le Fooding 有資料」的餐廳。您可以嘗試擴大範圍或換個地標。")
                                 
             except Exception as e:
                 st.error(f"搜尋失敗: {e}")
 
     if st.session_state.target_restaurant:
-        st.info(f"已選擇：**{st.session_state.target_restaurant}**，請回「🔍 直接搜尋餐廳」分頁查看詳情 (或直接按上方的分析鈕)。")
+        st.info(f"已選擇：**{st.session_state.target_restaurant}**，請回「🔍 直接搜尋餐廳」分頁查看詳情。")
