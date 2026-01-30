@@ -2,42 +2,29 @@ import streamlit as st
 import google.generativeai as genai
 
 st.set_page_config(page_title="巴黎美食 AI", page_icon="🇫🇷")
-
 st.title("🇫🇷 巴黎餐廳 AI 分析器")
-st.caption("輸入餐廳，一鍵比對 TheFork, Le Fooding 與 Google 評價")
+st.caption("輸入餐廳，AI 自動調用您帳號可用的模型進行分析")
 
 # 左側輸入 API Key
 with st.sidebar:
     api_key = st.text_input("輸入 Gemini API Key", type="password")
     st.markdown("[👉 按此取得免費 Key](https://aistudio.google.com/app/apikey)")
 
-# --- 關鍵功能：自動偵測可用模型 (避免 429 錯誤) ---
-def get_best_model(api_key):
+# --- 關鍵功能：直接問系統有哪些模型可用 ---
+def get_first_working_model(api_key):
     """
-    自動向 Google 查詢目前可用的模型，優先選擇 1.5 Flash。
+    不猜測模型名稱，直接列出帳號下可用的模型，並回傳第一個。
     """
     try:
         genai.configure(api_key=api_key)
-        available_models = []
+        # 列出所有模型
         for m in genai.list_models():
+            # 只要該模型支援「文字生成 (generateContent)」，就直接選它
             if 'generateContent' in m.supported_generation_methods:
-                available_models.append(m.name)
-        
-        # 1. 優先尋找最穩定的 1.5 flash
-        for model in available_models:
-            if 'gemini-1.5-flash' in model:
-                return model
-        
-        # 2. 如果沒有，就找任何含有 flash 的 (通常較快且免費)
-        for model in available_models:
-            if 'flash' in model:
-                return model
-                
-        # 3. 真的都沒有，就回傳清單中的第一個
-        return available_models[0] if available_models else 'gemini-1.5-flash'
-    except:
-        # 如果查詢失敗，直接回傳最穩定的預設值
-        return 'gemini-1.5-flash'
+                return m.name # 直接回傳系統給的名稱 (例如 models/gemini-pro)
+    except Exception as e:
+        return None
+    return None
 
 # 主畫面輸入框
 restaurant_name = st.text_input("請輸入餐廳名稱 (例如: Septime)")
@@ -58,24 +45,34 @@ if st.button("開始分析") and restaurant_name:
 
         # 2. AI 分析
         st.divider()
+        status_box = st.empty() # 建立一個狀態顯示框
+        
         try:
-            # 呼叫自動偵測函式
-            model_name = 'gemini-1.5-flash'
+            status_box.info("🔍 正在尋找您帳號可用的 AI 模型...")
             
-            # 建立模型
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash-001')
+            # 自動抓取正確的模型名稱
+            valid_model_name = get_first_working_model(api_key)
             
-            with st.spinner(f"AI 正在連線分析中 (使用核心: {model_name})..."):
-                prompt = f"""
-                你是一位嚴格的巴黎美食評論家。使用者想去 "{restaurant_name}"。
-                請用繁體中文分析：
-                1.這家店的風格與定位？
-                2.必點的 2 道菜是什麼？
-                3.有什麼缺點或地雷？(例如難訂位、服務差、遊客太多)
-                4.綜合評分 (1-10分) 與一句話結論。
-                """
-                response = model.generate_content(prompt)
-                st.markdown(response.text)
+            if not valid_model_name:
+                status_box.error("❌ 找不到任何可用模型！請確認您的 API Key 是否正確，或是否已在 Google AI Studio 開通權限。")
+            else:
+                status_box.success(f"✅ 成功連線！使用模型：{valid_model_name}")
+                
+                # 建立模型
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel(valid_model_name)
+                
+                with st.spinner("AI 正在撰寫分析報告..."):
+                    prompt = f"""
+                    你是一位嚴格的巴黎美食評論家。使用者想去 "{restaurant_name}"。
+                    請用繁體中文分析：
+                    1.這家店的風格與定位？
+                    2.必點的 2 道菜是什麼？
+                    3.有什麼缺點或地雷？(例如難訂位、服務差、遊客太多)
+                    4.綜合評分 (1-10分) 與一句話結論。
+                    """
+                    response = model.generate_content(prompt)
+                    st.markdown(response.text)
+                    
         except Exception as e:
-            st.error(f"發生錯誤: {e}")
+            st.error(f"發生未預期的錯誤: {e}")
