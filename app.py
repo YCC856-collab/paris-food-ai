@@ -1,6 +1,7 @@
 import streamlit as st
 import google.generativeai as genai
 import urllib.parse
+import time # 新增時間模組，用來處理重試
 
 st.set_page_config(page_title="巴黎美食 AI", page_icon="🇫🇷")
 st.title("🇫🇷 巴黎餐廳 AI 嚮導")
@@ -14,16 +15,30 @@ else:
         api_key = st.text_input("輸入 Gemini API Key", type="password")
         st.markdown("[👉 按此取得免費 Key](https://aistudio.google.com/app/apikey)")
 
-# --- 2. 函式區 ---
-def get_first_working_model(api_key):
+# --- 2. 函式區 (重大升級：優先抓 Flash 模型) ---
+def get_best_model(api_key):
+    """
+    優先選擇 'gemini-1.5-flash'，因為它的免費額度最高 (15 RPM)。
+    避開 'pro'，因為它每分鐘只能跑 2 次，很容易報錯。
+    """
     try:
         genai.configure(api_key=api_key)
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                return m.name
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # 策略 1: 優先找 1.5 Flash (最穩)
+        for m in models:
+            if "gemini-1.5-flash" in m and "exp" not in m: # 避開實驗版，找正式版
+                return m
+        
+        # 策略 2: 找不到正式版，找 Flash 任意版
+        for m in models:
+            if "flash" in m:
+                return m
+                
+        # 策略 3: 真的沒有，才用其他的 (例如 Pro)
+        return models[0] if models else None
     except Exception:
         return None
-    return None
 
 # --- 3. Session State 管理 ---
 if 'target_restaurant' not in st.session_state:
@@ -59,10 +74,11 @@ with tab1:
             status_box = st.empty()
             
             try:
-                valid_model_name = get_first_working_model(api_key)
+                valid_model_name = get_best_model(api_key) # 改用新的選擇器
                 if not valid_model_name:
                     status_box.error("❌ 找不到可用模型")
                 else:
+                    # status_box.info(f"使用模型: {valid_model_name}") # 除錯用，確認是不是用到 Flash
                     genai.configure(api_key=api_key)
                     model = genai.GenerativeModel(valid_model_name)
                     
@@ -92,10 +108,13 @@ with tab1:
                         response = model.generate_content(prompt)
                         st.markdown(response.text)
             except Exception as e:
-                st.error(f"發生錯誤: {e}")
+                if "429" in str(e):
+                    st.error("🐢 抱歉，免費版 AI 累了 (429 Error)。請等待 30 秒後再試一次！")
+                else:
+                    st.error(f"發生錯誤: {e}")
 
 # ==========================================
-# 分頁 2: 超嚴格篩選版附近探索
+# 分頁 2: 嚴格篩選版附近探索
 # ==========================================
 with tab2:
     st.header("📍 尋找附近 100m 美食")
@@ -109,7 +128,7 @@ with tab2:
             st.warning("請輸入地點喔！")
         else:
             try:
-                valid_model_name = get_first_working_model(api_key)
+                valid_model_name = get_best_model(api_key) # 改用新的選擇器
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(valid_model_name)
                 
@@ -144,16 +163,13 @@ with tab2:
                             clean_line = line.replace("*", "").strip()
                             parts = clean_line.split('|')
                             
-                            # 解析資料 (包含新的 Proof 欄位)
                             r_name_raw = parts[0].replace("Name:", "").strip() if len(parts) > 0 else "未知餐廳"
                             r_style = parts[1].replace("Style:", "").strip() if len(parts) > 1 else "風格未知"
                             r_rating = parts[2].replace("Rating:", "").strip() if len(parts) > 2 else "N/A"
                             r_proof = parts[3].replace("Proof:", "").strip() if len(parts) > 3 else "資料驗證中..."
                             
-                            # 介面顯示
                             col_a, col_b = st.columns([3, 1])
                             with col_a:
-                                # 把 Proof 顯示出來，讓使用者知道為什麼推薦這家
                                 st.markdown(f"""
                                 **{r_name_raw}** ⭐ **{r_rating}** <small style='color:#2E7D32'>📝 {r_proof}</small>  
                                 <small style='color:gray'>類型: {r_style}</small>
@@ -170,7 +186,10 @@ with tab2:
                         st.warning("篩選過於嚴格，AI 找不到它敢保證有資料的附近餐廳。")
                                 
             except Exception as e:
-                st.error(f"搜尋失敗: {e}")
+                if "429" in str(e):
+                    st.error("🐢 抱歉，免費版 AI 累了 (429 Error)。請等待 30-60 秒後再試一次！")
+                else:
+                    st.error(f"發生錯誤: {e}")
 
     if st.session_state.target_restaurant:
         st.info(f"已選擇：**{st.session_state.target_restaurant}**，請回「🔍 直接搜尋餐廳」分頁查看詳情。")
