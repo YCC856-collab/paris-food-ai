@@ -1,12 +1,12 @@
 import streamlit as st
 import google.generativeai as genai
-import urllib.parse  # 新增：用來處理網址編碼
+import urllib.parse  # 用來處理網址
 
 st.set_page_config(page_title="巴黎美食 AI", page_icon="🇫🇷")
 st.title("🇫🇷 巴黎餐廳 AI 分析器")
 st.caption("專注於 TheFork 與 Le Fooding 的深度分析")
 
-# --- API Key 處理邏輯 ---
+# --- API Key 處理 ---
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
@@ -32,24 +32,25 @@ if st.button("開始分析") and restaurant_name:
     if not api_key:
         st.error("請先設定 API Key！")
     else:
-        # --- 1. 改良版：快速傳送門 (自動搜尋) ---
-        st.subheader("🔗 快速傳送門 (點擊直達搜尋結果)")
+        # --- 關鍵修正：強制加上 "Paris" 並轉成網址格式 ---
+        # 例如輸入 "Septime"，這邊會變成 "Septime+Paris"
+        # quote_plus 會把空格變成 + 號，搜尋引擎比較看得懂
+        search_query = urllib.parse.quote_plus(f"{restaurant_name} Paris")
         
-        # 處理網址編碼 (例如把空格變成 %20)，並強制加上 Paris 以防搜尋到別的城市
-        search_query = urllib.parse.quote(f"{restaurant_name} Paris")
+        st.subheader("🔗 快速傳送門 (已鎖定巴黎)")
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            # Google Maps 還是留著方便看地圖，但分析不看它
-            st.link_button("📍 Google Maps", f"https://www.google.com/maps/search/?api=1&query={search_query}")
+            # Google Maps
+            st.link_button("📍 Google Maps", f"https://www.google.com/maps?q={search_query}")
         with col2:
-            # TheFork 搜尋連結
+            # TheFork (直接帶入 名稱+Paris)
             st.link_button("🍴 TheFork", f"https://www.thefork.fr/search?q={search_query}")
         with col3:
-            # Le Fooding 搜尋連結
+            # Le Fooding (直接帶入 名稱+Paris)
             st.link_button("🍷 Le Fooding", f"https://lefooding.com/en/search?query={search_query}")
 
-        # --- 2. 嚴格限制版 AI 分析 ---
+        # --- AI 分析區 (嚴格限制來源) ---
         st.divider()
         status_box = st.empty()
         
@@ -66,7 +67,7 @@ if st.button("開始分析") and restaurant_name:
                 model = genai.GenerativeModel(valid_model_name)
                 
                 with st.spinner("AI 正在交叉比對兩大平台數據..."):
-                    # 修改後的 Prompt：嚴格限制來源
+                    # Prompt 保持不變：嚴格限制來源
                     prompt = f"""
                     你是一位專精於巴黎餐廳的數據分析師。使用者查詢餐廳 "{restaurant_name}"。
                     
