@@ -64,7 +64,7 @@ if st.button("開始分析") and restaurant_name:
             
             # 建立模型
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(model_name)
+            model = genai.GenerativeModel('gemini-pro')
             
             with st.spinner(f"AI 正在連線分析中 (使用核心: {model_name})..."):
                 prompt = f"""
