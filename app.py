@@ -7,35 +7,54 @@ st.set_page_config(page_title="巴黎美食 AI", page_icon="🇫🇷")
 st.title("🇫🇷 巴黎餐廳 AI 嚮導")
 st.caption("專注於 TheFork 與 Le Fooding 的深度分析與探索")
 
-# --- 1. API Key 處理 (改回強制手動輸入) ---
-# 無論雲端有沒有藏鑰匙，這裡都強制要求使用者自己在左側輸入
+# --- 1. 側邊欄設定 (API Key + 模式選擇) ---
 with st.sidebar:
     api_key = st.text_input("請輸入您的 Gemini API Key", type="password")
     st.markdown("[👉 按此取得免費 Key](https://aistudio.google.com/app/apikey)")
-    st.info("💡 提示：此 App 需要您自己的 API Key 才能運作。")
+    
+    st.divider()
+    
+    # 新增：模式選擇器
+    model_mode = st.radio(
+        "選擇 AI 大腦模式：",
+        ("🚀 快捷型 (推薦)", "🧠 思考型 (深度)"),
+        captions=["速度快，額度高 (Flash)", "邏輯強，額度低 (Pro)"]
+    )
+    
+    if "思考型" in model_mode:
+        st.warning("⚠️ 注意：思考型模型 (Pro) 的免費額度較低 (每分鐘約 2 次)，若操作太快容易出現 429 錯誤。")
 
-# --- 2. 函式區 (優先抓 Flash 模型) ---
-def get_best_model(api_key):
+# --- 2. 智慧模型選擇函式 ---
+def select_target_model(api_key, mode_selection):
     """
-    優先選擇 'gemini-1.5-flash'，因為它的免費額度最高 (15 RPM)。
-    避開 'pro'，因為它每分鐘只能跑 2 次，很容易報錯。
+    根據使用者的選擇，從帳號可用的模型中挑出最合適的那一個
     """
     try:
         genai.configure(api_key=api_key)
-        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # 列出所有支援生成的模型
+        all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
-        # 策略 1: 優先找 1.5 Flash (最穩)
-        for m in models:
-            if "gemini-1.5-flash" in m and "exp" not in m: 
-                return m
+        # 判斷使用者想要哪種
+        want_pro = "思考型" in mode_selection
         
-        # 策略 2: 找不到正式版，找 Flash 任意版
-        for m in models:
-            if "flash" in m:
-                return m
+        target_model = None
+        
+        if want_pro:
+            # 優先找 Pro 系列 (1.5 Pro -> 1.0 Pro)
+            for m in all_models:
+                if "gemini-1.5-pro" in m and "exp" not in m: return m
+            for m in all_models:
+                if "pro" in m: return m
+        else:
+            # 優先找 Flash 系列 (1.5 Flash)
+            for m in all_models:
+                if "gemini-1.5-flash" in m and "exp" not in m: return m
+            for m in all_models:
+                if "flash" in m: return m
                 
-        # 策略 3: 真的沒有，才用其他的
-        return models[0] if models else None
+        # 如果真的都找不到，回傳清單中的第一個當備案
+        return target_model if target_model else (all_models[0] if all_models else None)
+        
     except Exception:
         return None
 
@@ -47,7 +66,7 @@ if 'target_restaurant' not in st.session_state:
 tab1, tab2 = st.tabs(["🔍 直接搜尋餐廳", "📍 尋找附近美食"])
 
 # ==========================================
-# 分頁 1: 原本的分析功能
+# 分頁 1: 深度分析功能
 # ==========================================
 with tab1:
     default_val = st.session_state.target_restaurant if st.session_state.target_restaurant else ""
@@ -58,7 +77,7 @@ with tab1:
 
     if st.button("開始分析", key="btn_analyze") and restaurant_name:
         if not api_key:
-            st.error("請先在左側輸入 API Key 喔！")
+            st.error("請先在左側輸入 API Key！")
         else:
             # 快速傳送門
             search_query = urllib.parse.quote_plus(f"{restaurant_name} Paris")
@@ -73,10 +92,15 @@ with tab1:
             status_box = st.empty()
             
             try:
-                valid_model_name = get_best_model(api_key)
+                # 使用新的選擇函式
+                valid_model_name = select_target_model(api_key, model_mode)
+                
                 if not valid_model_name:
                     status_box.error("❌ API Key 無效或找不到可用模型")
                 else:
+                    # 顯示當前使用的模型 (讓使用者安心)
+                    status_box.caption(f"🤖 正使用模型：`{valid_model_name}`")
+                    
                     genai.configure(api_key=api_key)
                     model = genai.GenerativeModel(valid_model_name)
                     
@@ -107,12 +131,12 @@ with tab1:
                         st.markdown(response.text)
             except Exception as e:
                 if "429" in str(e):
-                    st.error("🐢 抱歉，免費版 AI 累了 (429 Error)。請等待 30 秒後再試一次！")
+                    st.error("🐢 AI 累了 (429 Error)。若是使用「思考型」，請等待 60 秒再試，或切換回「快捷型」。")
                 else:
                     st.error(f"發生錯誤: {e}")
 
 # ==========================================
-# 分頁 2: 嚴格篩選版附近探索
+# 分頁 2: 附近探索 (嚴格篩選)
 # ==========================================
 with tab2:
     st.header("📍 尋找附近 100m 美食")
@@ -121,17 +145,18 @@ with tab2:
     
     if st.button("搜尋附近餐廳", key="btn_explore"):
         if not api_key:
-            st.error("請先在左側輸入 API Key 喔！")
+            st.error("請先在左側輸入 API Key！")
         elif not location_input:
             st.warning("請輸入地點喔！")
         else:
             try:
-                valid_model_name = get_best_model(api_key)
+                # 使用新的選擇函式
+                valid_model_name = select_target_model(api_key, model_mode)
+                
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(valid_model_name)
                 
                 with st.spinner(f"正在 {location_input} 附近嚴格篩選 TheFork/Le Fooding 餐廳..."):
-                    # Prompt 更新：要求「舉證」
                     explore_prompt = f"""
                     任務：找出巴黎地點 "{location_input}" 附近 **走路 5 分鐘內** 的餐廳。
                     
@@ -152,6 +177,8 @@ with tab2:
                     response = model.generate_content(explore_prompt)
                     
                     st.success(f"✨ 在 {location_input} 附近找到以下「有憑有據」的餐廳：")
+                    status_box_explore = st.empty()
+                    status_box_explore.caption(f"🤖 使用模型：`{valid_model_name}`")
                     
                     lines = response.text.split('\n')
                     found_any = False
@@ -185,7 +212,7 @@ with tab2:
                                 
             except Exception as e:
                 if "429" in str(e):
-                    st.error("🐢 抱歉，免費版 AI 累了 (429 Error)。請等待 30-60 秒後再試一次！")
+                    st.error("🐢 AI 累了 (429 Error)。若是使用「思考型」，請等待 60 秒再試，或切換回「快捷型」。")
                 else:
                     st.error(f"發生錯誤: {e}")
 
