@@ -7,14 +7,21 @@ st.set_page_config(page_title="巴黎美食 AI", page_icon="🇫🇷")
 st.title("🇫🇷 巴黎餐廳 AI 嚮導")
 st.caption("專注於 TheFork 與 Le Fooding 的深度分析與探索")
 
-# --- 1. 側邊欄設定 (API Key + 模式選擇) ---
+# --- 1. 側邊欄設定 (改為按鈕確認模式) ---
 with st.sidebar:
+    st.header("🔑 設定")
     api_key = st.text_input("請輸入您的 Gemini API Key", type="password")
-    st.markdown("[👉 按此取得免費 Key](https://aistudio.google.com/app/apikey)")
     
+    # 修改處：原本的連結換成按鈕
+    if st.button("確認輸入"):
+        if api_key:
+            st.success("✅ API Key 已暫存")
+        else:
+            st.error("⚠️ 請輸入 Key 才能使用")
+            
     st.divider()
     
-    # 新增：模式選擇器
+    # 模式選擇器 (保留這個好功能)
     model_mode = st.radio(
         "選擇 AI 大腦模式：",
         ("🚀 快捷型 (推薦)", "🧠 思考型 (深度)"),
@@ -22,7 +29,7 @@ with st.sidebar:
     )
     
     if "思考型" in model_mode:
-        st.warning("⚠️ 注意：思考型模型 (Pro) 的免費額度較低 (每分鐘約 2 次)，若操作太快容易出現 429 錯誤。")
+        st.warning("⚠️ 注意：思考型 (Pro) 額度較低 (約 2 次/分)，操作過快易出現 429 錯誤。")
 
 # --- 2. 智慧模型選擇函式 ---
 def select_target_model(api_key, mode_selection):
@@ -31,30 +38,25 @@ def select_target_model(api_key, mode_selection):
     """
     try:
         genai.configure(api_key=api_key)
-        # 列出所有支援生成的模型
         all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
-        # 判斷使用者想要哪種
         want_pro = "思考型" in mode_selection
-        
         target_model = None
         
         if want_pro:
-            # 優先找 Pro 系列 (1.5 Pro -> 1.0 Pro)
+            # 優先找 Pro 系列
             for m in all_models:
                 if "gemini-1.5-pro" in m and "exp" not in m: return m
             for m in all_models:
                 if "pro" in m: return m
         else:
-            # 優先找 Flash 系列 (1.5 Flash)
+            # 優先找 Flash 系列
             for m in all_models:
                 if "gemini-1.5-flash" in m and "exp" not in m: return m
             for m in all_models:
                 if "flash" in m: return m
                 
-        # 如果真的都找不到，回傳清單中的第一個當備案
         return target_model if target_model else (all_models[0] if all_models else None)
-        
     except Exception:
         return None
 
@@ -92,13 +94,11 @@ with tab1:
             status_box = st.empty()
             
             try:
-                # 使用新的選擇函式
                 valid_model_name = select_target_model(api_key, model_mode)
                 
                 if not valid_model_name:
                     status_box.error("❌ API Key 無效或找不到可用模型")
                 else:
-                    # 顯示當前使用的模型 (讓使用者安心)
                     status_box.caption(f"🤖 正使用模型：`{valid_model_name}`")
                     
                     genai.configure(api_key=api_key)
@@ -150,7 +150,6 @@ with tab2:
             st.warning("請輸入地點喔！")
         else:
             try:
-                # 使用新的選擇函式
                 valid_model_name = select_target_model(api_key, model_mode)
                 
                 genai.configure(api_key=api_key)
