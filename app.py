@@ -1,21 +1,20 @@
 import streamlit as st
 import google.generativeai as genai
 import urllib.parse
-import time # 新增時間模組，用來處理重試
+import time
 
 st.set_page_config(page_title="巴黎美食 AI", page_icon="🇫🇷")
 st.title("🇫🇷 巴黎餐廳 AI 嚮導")
 st.caption("專注於 TheFork 與 Le Fooding 的深度分析與探索")
 
-# --- 1. API Key 處理 ---
-if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
-else:
-    with st.sidebar:
-        api_key = st.text_input("輸入 Gemini API Key", type="password")
-        st.markdown("[👉 按此取得免費 Key](https://aistudio.google.com/app/apikey)")
+# --- 1. API Key 處理 (改回強制手動輸入) ---
+# 無論雲端有沒有藏鑰匙，這裡都強制要求使用者自己在左側輸入
+with st.sidebar:
+    api_key = st.text_input("請輸入您的 Gemini API Key", type="password")
+    st.markdown("[👉 按此取得免費 Key](https://aistudio.google.com/app/apikey)")
+    st.info("💡 提示：此 App 需要您自己的 API Key 才能運作。")
 
-# --- 2. 函式區 (重大升級：優先抓 Flash 模型) ---
+# --- 2. 函式區 (優先抓 Flash 模型) ---
 def get_best_model(api_key):
     """
     優先選擇 'gemini-1.5-flash'，因為它的免費額度最高 (15 RPM)。
@@ -27,7 +26,7 @@ def get_best_model(api_key):
         
         # 策略 1: 優先找 1.5 Flash (最穩)
         for m in models:
-            if "gemini-1.5-flash" in m and "exp" not in m: # 避開實驗版，找正式版
+            if "gemini-1.5-flash" in m and "exp" not in m: 
                 return m
         
         # 策略 2: 找不到正式版，找 Flash 任意版
@@ -35,7 +34,7 @@ def get_best_model(api_key):
             if "flash" in m:
                 return m
                 
-        # 策略 3: 真的沒有，才用其他的 (例如 Pro)
+        # 策略 3: 真的沒有，才用其他的
         return models[0] if models else None
     except Exception:
         return None
@@ -59,7 +58,7 @@ with tab1:
 
     if st.button("開始分析", key="btn_analyze") and restaurant_name:
         if not api_key:
-            st.error("請先設定 API Key！")
+            st.error("請先在左側輸入 API Key 喔！")
         else:
             # 快速傳送門
             search_query = urllib.parse.quote_plus(f"{restaurant_name} Paris")
@@ -74,11 +73,10 @@ with tab1:
             status_box = st.empty()
             
             try:
-                valid_model_name = get_best_model(api_key) # 改用新的選擇器
+                valid_model_name = get_best_model(api_key)
                 if not valid_model_name:
-                    status_box.error("❌ 找不到可用模型")
+                    status_box.error("❌ API Key 無效或找不到可用模型")
                 else:
-                    # status_box.info(f"使用模型: {valid_model_name}") # 除錯用，確認是不是用到 Flash
                     genai.configure(api_key=api_key)
                     model = genai.GenerativeModel(valid_model_name)
                     
@@ -123,12 +121,12 @@ with tab2:
     
     if st.button("搜尋附近餐廳", key="btn_explore"):
         if not api_key:
-            st.error("請先設定 API Key！")
+            st.error("請先在左側輸入 API Key 喔！")
         elif not location_input:
             st.warning("請輸入地點喔！")
         else:
             try:
-                valid_model_name = get_best_model(api_key) # 改用新的選擇器
+                valid_model_name = get_best_model(api_key)
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel(valid_model_name)
                 
